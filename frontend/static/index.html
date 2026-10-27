@@ -550,6 +550,7 @@ const imagePreviewThumb = document.getElementById("image-preview-thumb");
 const removeImageBtn = document.getElementById("remove-image-btn");
 
 let currentImageData = null;
+let pendingMakeoverPrompt = null;
 
 cameraBtn.addEventListener("click", () => {
   faceInput.click();
@@ -563,12 +564,19 @@ faceInput.addEventListener("change", (e) => {
     currentImageData = evt.target.result;
     imagePreviewThumb.src = currentImageData;
     imagePreviewBar.style.display = "flex";
+
+    if (pendingMakeoverPrompt) {
+      const promptToSend = pendingMakeoverPrompt;
+      pendingMakeoverPrompt = null;
+      sendMessage(promptToSend);
+    }
   };
   reader.readAsDataURL(file);
 });
 
 removeImageBtn.addEventListener("click", () => {
   currentImageData = null;
+  pendingMakeoverPrompt = null;
   faceInput.value = "";
   imagePreviewBar.style.display = "none";
 });
@@ -766,7 +774,41 @@ form.addEventListener("submit", (ev) => {
 document.querySelectorAll(".prompt-chip").forEach((chip) => {
   chip.addEventListener("click", () => {
     const text = chip.getAttribute("data-prompt");
-    if (text) sendMessage(text);
+    if (!text) return;
+
+    const isMakeoverOrAnalysis = chip.classList.contains("makeover-chip") ||
+      text.includes("Picasso") ||
+      text.includes("Russian Lip") ||
+      text.includes("makeover") ||
+      text.includes("Face Skin Analysis") ||
+      chip.textContent.includes("Face Skin Analysis") ||
+      chip.textContent.includes("Botox & Filler");
+
+    if (isMakeoverOrAnalysis && !currentImageData) {
+      pendingMakeoverPrompt = text;
+      const chipTitle = chip.textContent.trim();
+      const b = bubble("agent");
+      b.innerHTML = `
+        <div style="display:flex; flex-direction:column; gap:0.55rem;">
+          <div style="font-weight:700; color:var(--accent); font-size:1.05rem;">📸 Face Photo Required</div>
+          <div>To apply <strong>${chipTitle}</strong> to your facial contours, please upload or take a photo of your face first so we can map your unique facial anatomy and symmetry.</div>
+          <div style="background:#fff7f9; border:1px solid rgba(154,76,104,0.25); border-radius:10px; padding:0.6rem 0.8rem; font-size:0.83rem; line-height:1.45;">
+            <div style="font-weight:600; margin-bottom:0.25rem; color:var(--accent);">📋 Clinical Photo Requirements:</div>
+            <div>• <strong>Lighting:</strong> Bright, even, natural or soft diffused lighting</div>
+            <div>• <strong>Angle & Pose:</strong> Front-facing or slight 3/4 angle with relaxed, neutral expression</div>
+            <div>• <strong>Clarity:</strong> Target features (lips, chin, jawline, cheeks) clearly visible without sunglasses or heavy filters</div>
+          </div>
+          <button type="button" class="prompt-chip makeover-chip" style="align-self:flex-start; margin-top:0.2rem; cursor:pointer;" onclick="document.getElementById('face-input').click()">
+            📸 Open Camera / Select Photo
+          </button>
+        </div>
+      `;
+      log.scrollTop = log.scrollHeight;
+      faceInput.click();
+      return;
+    }
+
+    sendMessage(text);
   });
 });
 </script>

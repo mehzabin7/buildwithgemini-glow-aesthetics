@@ -212,6 +212,8 @@ async def chat(req: Request):
         full_text = f"[Client attached face photo: {public_image_url}]\n{message or 'Please perform a clinical skin analysis on my face, assess skin texture, tone, and expression lines, and recommend tailored treatments.'}"
     elif not full_text:
         full_text = "Hello! Please recommend aesthetic treatments for my skin."
+    else:
+        full_text = f"[Client has not attached a face photo]\n{message}"
 
     msg_parts.append(Part(root=TextPart(text=full_text)))
 
