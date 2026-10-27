@@ -686,6 +686,129 @@ def generate_post_treatment_preview(
         return {"error": f"Post-treatment simulation failed: {str(e)}"}
 
 
+def generate_face_makeover_preview(
+    makeover_style: str,
+    target_features: str,
+    technique: str,
+    client_facial_features: str,
+    desired_aesthetic_outcome: str,
+    tool_context: ToolContext = None,
+) -> dict:
+    """Generates a high-definition clinical aesthetic makeover simulation showing facial contouring and beautification options applied to the client's face.
+
+    Supports premier aesthetic methodologies:
+    - 'Picasso Technique (Architectural Full-Face Harmonization)': Full-face vector mapping, Phi golden-ratio proportions, structural anchor points across temples, cheeks, chin, and jawline for global balance.
+    - 'Russian Lip Technique & Cupid\'s Bow Sculpting': Vertical micro-droplet injection creating height, crisp vermilion border, and accentuated Cupid's bow with a flat side profile.
+    - 'Nefertiti Mandibular Jawline & Chin Sculpting': Razor-sharp jawline definition, sculpted gonial angle, and elongated chin apex.
+    - 'MD Codes™ Midface & Cheek Elevation': Precise anatomical anchoring restoring cheek apex projection and softening tear troughs.
+
+    Uses gemini-3.1-flash-lite-image in the global region. Saves the image artifact to tool_context and uploads
+    to the public Cloud Storage bucket, returning the permanent HTTPS URL for A2UI rendering.
+
+    Args:
+        makeover_style: The makeover category (e.g. 'Picasso Full-Face Harmonization', 'Russian Lip Filler & Cupid\'s Bow', 'Nefertiti Jawline & Chin Contour', 'MD Codes Cheek Lift').
+        target_features: Specific facial features being enhanced (e.g. 'Lips & Vermilion Border', 'Jawline, Chin & Gonial Angle', 'Full Face, Temples & Cheeks').
+        technique: Aesthetic injection or contouring methodology (e.g. 'Picasso structural vector balancing', 'Russian vertical fanning micro-droplets', 'MD Codes Ck1-Ck3 structural bolus', 'Mandibular cannula contouring').
+        client_facial_features: Description of the client's facial structure, skin tone, and features from their uploaded photo.
+        desired_aesthetic_outcome: The targeted aesthetic transformation (e.g. 'Lush doll-like lips with defined Cupid\'s bow and flat profile' or 'Harmonious full-face architectural balance without overfilling').
+        tool_context: Injected tool context for saving artifacts in the playground.
+
+    Returns:
+        Dictionary containing status, makeover_style, target_features, technique, public_url, and artifact_filename.
+    """
+    try:
+        client = genai.Client(
+            vertexai=True,
+            project=FIRESTORE_PROJECT_ID,
+            location="global",
+        )
+
+        style_lower = makeover_style.lower()
+        if "picasso" in style_lower or "harmonization" in style_lower or "full face" in style_lower:
+            technique_focus = (
+                "Architectural full-face facial balancing and structural harmonization inspired by the Picasso Technique. "
+                "Global anatomical equilibrium: restored temporal transitions, elevated malar cheek projection, refined jawline angle, "
+                "proportional chin elongation, and balanced lips. Zero overfilling, pure architectural symmetry, preserving natural identity."
+            )
+        elif "lip" in style_lower or "russian" in style_lower or "cupid" in style_lower:
+            technique_focus = (
+                "High-definition lip augmentation using the Russian Lip Technique and Cupid's bow sculpting. "
+                "Vertical lip height elevation, crisp defined vermilion border, accentuated heart-shaped Cupid's bow, "
+                "plump pillowy texture with an elegant flat lateral profile (no anterior duck-lip projection). Lush natural hydration."
+            )
+        elif "jawline" in style_lower or "chin" in style_lower or "nefertiti" in style_lower:
+            technique_focus = (
+                "High-definition lower facial contouring featuring Nefertiti Mandibular Jawline & Chin Sculpting. "
+                "Razor-sharp jawline definition along the mandibular border, sculpted gonial angle, elongated chin apex, "
+                "smooth pre-jowl transition, restoring the youthful inverted triangle of beauty."
+            )
+        elif "cheek" in style_lower or "midface" in style_lower or "md code" in style_lower:
+            technique_focus = (
+                "Midface elevation and contouring following MD Codes anchor points (Ck1-Ck3). "
+                "Youthful malar cheek apex projection, lifted lateral cheeks, smoothed tear-trough transition, "
+                "refreshing midface fatigue and restoring light reflection."
+            )
+        else:
+            technique_focus = (
+                f"Precision aesthetic beautification using {technique}. "
+                f"Enhancing {target_features} to achieve {desired_aesthetic_outcome}."
+            )
+
+        prompt = (
+            f"Clinical medical aesthetics makeover result portrait: High-end close-up beauty portrait showing {makeover_style}. "
+            f"Client profile: {client_facial_features}. "
+            f"Technique methodology: {technique_focus}. "
+            f"Desired outcome: {desired_aesthetic_outcome}. "
+            "High resolution 8k photography, natural skin pores and micro-texture, soft luxury medspa lighting, refined editorial aesthetics, believable anatomical perfection."
+        )
+
+        response = client.models.generate_content(
+            model="gemini-3.1-flash-lite-image",
+            contents=[prompt],
+            config=types.GenerateContentConfig(
+                response_modalities=["IMAGE"],
+            ),
+        )
+
+        image_bytes = None
+        mime_type = "image/jpeg"
+        if response.parts:
+            for part in response.parts:
+                if part.inline_data and part.inline_data.data:
+                    image_bytes = part.inline_data.data
+                    mime_type = part.inline_data.mime_type or "image/jpeg"
+                    break
+
+        if not image_bytes:
+            return {"error": "Failed to generate face makeover preview image."}
+
+        filename = f"makeover_{uuid.uuid4().hex[:8]}.jpg"
+
+        if tool_context is not None:
+            part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+            tool_context.save_artifact(filename=filename, artifact=part)
+
+        storage_client = storage.Client(project=FIRESTORE_PROJECT_ID)
+        bucket = storage_client.bucket(GCS_MEDIA_BUCKET)
+        blob = bucket.blob(filename)
+        blob.upload_from_string(image_bytes, content_type=mime_type)
+
+        public_url = f"https://storage.googleapis.com/{GCS_MEDIA_BUCKET}/{filename}"
+
+        return {
+            "status": "success",
+            "makeover_style": makeover_style,
+            "target_features": target_features,
+            "technique": technique,
+            "artifact_filename": filename,
+            "public_url": public_url,
+            "clinical_notes": f"Simulated {makeover_style} generated successfully using {technique}. Ready for A2UI presentation.",
+        }
+    except Exception as e:
+        return {"error": f"Face makeover simulation failed: {str(e)}"}
+
+
+
 code_executor = AgentEngineSandboxCodeExecutor(
     sandbox_resource_name=SANDBOX_RESOURCE_NAME,
 )
@@ -727,10 +850,23 @@ role_description = (
     "3. Botox & Dermal Filler Post-Treatment Visual Simulations:\n"
     "   - When discussing or recommending Botox or Dermal Fillers, call `generate_post_treatment_preview` to generate a realistic visual preview of the anticipated subtle post-treatment outcome.\n"
     "   - Display the generated preview URL in an A2UI card with treatment details and realistic expectations.\n\n"
+    "### FACE MAKEOVER & BEAUTIFICATION STUDIO PROTOCOL (PICASSO TECHNIQUE & AESTHETIC METHODOLOGIES)\n"
+    "When a client requests a makeover, facial contouring, beautification, or inquires about enhancing specific features (like lips, jawline, cheeks, or overall balance):\n"
+    "1. Educate & Present Options Across Premier Aesthetic Methodologies:\n"
+    "   - The Picasso Technique (Architectural Full-Face Harmonization): Pioneered by Dr. Farzan Malekzadeh, this technique treats the face as an integrated anatomical canvas. Rather than overfilling isolated zones, it evaluates structural vectors and Phi (golden ratio) proportions across anchor points (temples, malar cheeks, chin apex, and jawline angle) to achieve global equilibrium and natural lift without overfilling.\n"
+    "   - Russian Lip Technique & Cupid's Bow Sculpting: A vertical micro-droplet injection technique that builds lip height and sculpts an exquisite heart-shaped Cupid's bow with crisp vermilion borders and an elegant flat side-profile (avoiding duck-lip anterior projection).\n"
+    "   - Nefertiti Mandibular Jawline & Chin Sculpting: High-G-prime structural contouring defining the gonial angle and mandibular margin, coupled with platysma relaxation to create a sharp, snatched jawline and restore the youth triangle.\n"
+    "   - MD Codes™ Midface & Cheek Elevation: Developed by Dr. Maurício de Maio, utilizing precise anatomical anchor points (Ck1-Ck5) to restore cheek apex projection, soften tear troughs, and lift the midface naturally.\n"
+    "2. Personalized Client Choice & Exploration:\n"
+    "   - Provide clear options to the client (e.g. if the client wants lips, explain the Russian Lip & Cupid's Bow technique, and suggest how it pairs with Picasso full-face harmonization or jawline contouring).\n"
+    "   - Detail the treatment specifics: expected product (e.g. Restylane Kysse/Juvederm Volbella for lips, Voluma/Radiesse for jawline/cheeks), typical units/syringes, downtime, and investment.\n"
+    "3. High-Definition Visual Makeover Previews:\n"
+    "   - Always call `generate_face_makeover_preview` to show the client a high-definition simulated makeover of their chosen technique applied to their face.\n"
+    "   - Display the result in an A2UI card with the preview image, technique breakdown, and personalized aesthetic advice.\n\n"
     "### WORKFLOW GUIDELINES\n"
     "- At the start of each turn, use preloaded memories to check contraindications and tailor treatment recommendations.\n"
     "- Assist with treatments (facial rejuvenations, peels, microneedling, lasers, injectables), active ingredient safety checks, "
-    "live local UV index & sun safety, geocoding clinic addresses, finding nearby locations, visual treatment image previews, generating short aesthetic videos, post-treatment simulations, and booking consultations.\n"
+    "live local UV index & sun safety, geocoding clinic addresses, finding nearby locations, visual treatment image previews, generating short aesthetic videos, post-treatment simulations, face makeover simulations, and booking consultations.\n"
     "- Run Python code in the sandbox when calculating package discounts, treatment intervals, or custom pricing.\n"
     "- Always use your tools to provide accurate, verified information."
 )
@@ -777,6 +913,7 @@ root_agent = Agent(
         generate_treatment_image,
         generate_treatment_video,
         generate_post_treatment_preview,
+        generate_face_makeover_preview,
         book_consultation,
         get_consultation,
         get_current_time,

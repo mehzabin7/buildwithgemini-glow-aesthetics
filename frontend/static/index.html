@@ -417,6 +417,48 @@
     border: 2px solid rgba(255, 255, 255, 0.8);
   }
 
+  /* Makeover Studio Section */
+  .makeover-section {
+    max-width: 860px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 0.35rem 1.2rem 0;
+  }
+  .makeover-label-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.25rem;
+  }
+  .makeover-title {
+    font-size: 0.74rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+  .makeover-chips {
+    display: flex;
+    gap: 0.5rem;
+    overflow-x: auto;
+    padding-bottom: 0.25rem;
+    scrollbar-width: none;
+  }
+  .makeover-chips::-webkit-scrollbar { display: none; }
+  .makeover-chip {
+    white-space: nowrap;
+    background: linear-gradient(135deg, #fff 0%, #fff7f9 100%);
+    border: 1.5px solid rgba(154, 76, 104, 0.25);
+  }
+  .makeover-chip:hover {
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
+    color: #fff;
+    border-color: var(--accent);
+  }
+
   /* --- A2UI component styles (Card, Column, Row, Text, Divider, List, Image, Icon) --- */
   .a2card {
     border: 1px solid var(--border);
@@ -458,7 +500,18 @@
 <div id="log">
   <div class="welcome-card">
     <h2>Welcome to GlowAesthetics Concierge</h2>
-    <p>Discover personalized cosmetic treatments, clinical skincare regimens, and bespoke aesthetic plans designed for your unique skin goals. Upload or take a photo of your face anytime for an instant clinical skin assessment.</p>
+    <p>Discover personalized cosmetic treatments, clinical skincare regimens, and our <strong>Face Makeover & Beautification Studio</strong> featuring the <strong>Picasso Technique</strong> (full-face architectural harmonization), <strong>Russian Lip & Cupid's Bow Sculpting</strong>, and high-definition contouring. Upload your face photo anytime for an instant makeover simulation.</p>
+  </div>
+</div>
+<div class="makeover-section">
+  <div class="makeover-label-bar">
+    <span class="makeover-title">🎨 Face Makeover & Contouring Studio</span>
+  </div>
+  <div class="makeover-chips">
+    <button type="button" class="prompt-chip makeover-chip" data-prompt="I would like a full-face makeover using the Picasso Technique. Please analyze my facial features, evaluate structural vectors and balance, explain the Picasso methodology, and generate a simulated makeover preview.">🎨 Picasso Full-Face Harmonization</button>
+    <button type="button" class="prompt-chip makeover-chip" data-prompt="I want to do my lips. Please use the Russian Lip Technique to sculpt a lifted Cupid's bow and crisp border with a flat side profile, explain the technique, and show me the post-treatment look.">👄 Russian Lip & Cupid's Bow</button>
+    <button type="button" class="prompt-chip makeover-chip" data-prompt="I want a snatched jawline and chin makeover. Please use Nefertiti Mandibular Contouring to sculpt my jawline angle and chin projection, and generate a simulated preview.">💎 Nefertiti Jawline & Chin</button>
+    <button type="button" class="prompt-chip makeover-chip" data-prompt="I want a midface cheek makeover. Please use MD Codes to elevate my cheek apex and restore midface contour, and generate a simulated preview.">✨ MD Codes Cheek Lift</button>
   </div>
 </div>
 <div class="prompts-container">
