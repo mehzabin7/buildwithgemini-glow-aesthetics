@@ -330,6 +330,93 @@
     box-shadow: 0 5px 14px rgba(154, 76, 104, 0.35);
   }
 
+  .camera-btn {
+    padding: 0.75rem 1rem;
+    border: 1.5px solid var(--border);
+    border-radius: 26px;
+    background: var(--surface);
+    color: var(--accent);
+    font-size: 1.15rem;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 6px rgba(154, 76, 104, 0.05);
+  }
+  .camera-btn:hover {
+    background: var(--accent-light);
+    border-color: var(--accent);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(154, 76, 104, 0.2);
+  }
+
+  .image-preview-bar {
+    max-width: 860px;
+    margin: 0 auto 0.6rem;
+    display: flex;
+    align-items: center;
+  }
+  .image-preview-pill {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.45rem 0.85rem;
+    background: #fff;
+    border: 1.5px solid var(--accent-light);
+    border-radius: 20px;
+    box-shadow: 0 4px 12px rgba(154, 76, 104, 0.08);
+  }
+  .image-preview-pill img {
+    width: 44px;
+    height: 44px;
+    object-fit: cover;
+    border-radius: 12px;
+    border: 1.5px solid var(--accent);
+  }
+  .image-preview-text {
+    display: flex;
+    flex-direction: column;
+  }
+  .image-preview-text .preview-name {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .image-preview-text .preview-hint {
+    font-size: 0.74rem;
+    color: var(--text-muted);
+  }
+  .remove-image-btn {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    cursor: pointer;
+    color: var(--text-muted);
+    transition: all 0.15s ease;
+  }
+  .remove-image-btn:hover {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .user-uploaded-thumb {
+    max-width: 200px;
+    max-height: 200px;
+    object-fit: cover;
+    border-radius: 12px;
+    margin-bottom: 0.5rem;
+    display: block;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.12);
+    border: 2px solid rgba(255, 255, 255, 0.8);
+  }
+
   /* --- A2UI component styles (Card, Column, Row, Text, Divider, List, Image, Icon) --- */
   .a2card {
     border: 1px solid var(--border);
@@ -371,17 +458,30 @@
 <div id="log">
   <div class="welcome-card">
     <h2>Welcome to GlowAesthetics Concierge</h2>
-    <p>Discover personalized cosmetic treatments, clinical skincare regimens, and bespoke aesthetic plans designed for your unique skin goals.</p>
+    <p>Discover personalized cosmetic treatments, clinical skincare regimens, and bespoke aesthetic plans designed for your unique skin goals. Upload or take a photo of your face anytime for an instant clinical skin assessment.</p>
   </div>
 </div>
 <div class="prompts-container">
+  <button type="button" class="prompt-chip" data-prompt="📸 Please analyze my face picture, assess my skin condition, and recommend aesthetic treatments.">📸 Face Skin Analysis</button>
+  <button type="button" class="prompt-chip" data-prompt="Show me what Botox or Dermal Fillers would look like on my face with a simulated post-treatment preview.">💉 Botox & Filler Preview</button>
   <button type="button" class="prompt-chip" data-prompt="What aesthetic treatments and services do you offer?">✨ Treatment Menu</button>
-  <button type="button" class="prompt-chip" data-prompt="I have hyperpigmentation and acne scarring. What treatments do you recommend?">🌿 Hyperpigmentation & Acne</button>
-  <button type="button" class="prompt-chip" data-prompt="Calculate a 12-week treatment plan timeline and estimated package cost.">📅 12-Week Package Plan</button>
+  <button type="button" class="prompt-chip" data-prompt="Calculate a 12-week treatment plan timeline and estimated package cost.">📅 12-Week Package</button>
 </div>
 <div class="form-container">
+  <div id="image-preview-bar" class="image-preview-bar" style="display:none;">
+    <div class="image-preview-pill">
+      <img id="image-preview-thumb" src="" alt="Face photo preview">
+      <div class="image-preview-text">
+        <span class="preview-name">Face Portrait Attached</span>
+        <span class="preview-hint">Ready for clinical skin analysis</span>
+      </div>
+      <button type="button" id="remove-image-btn" class="remove-image-btn" title="Remove photo">✕</button>
+    </div>
+  </div>
   <form id="form">
-    <input id="input" placeholder="Ask about treatments, skin concerns, pricing, or aftercare…" autocomplete="off" autofocus>
+    <input type="file" id="face-input" accept="image/*" style="display:none">
+    <button type="button" id="camera-btn" class="camera-btn" title="Upload or take a photo of your face">📸</button>
+    <input id="input" placeholder="Ask about treatments, skin concerns, or upload your photo…" autocomplete="off" autofocus>
     <button class="send-btn">Send <span>✦</span></button>
   </form>
 </div>
@@ -390,6 +490,35 @@
 const log = document.getElementById("log");
 const form = document.getElementById("form");
 const input = document.getElementById("input");
+const cameraBtn = document.getElementById("camera-btn");
+const faceInput = document.getElementById("face-input");
+const imagePreviewBar = document.getElementById("image-preview-bar");
+const imagePreviewThumb = document.getElementById("image-preview-thumb");
+const removeImageBtn = document.getElementById("remove-image-btn");
+
+let currentImageData = null;
+
+cameraBtn.addEventListener("click", () => {
+  faceInput.click();
+});
+
+faceInput.addEventListener("change", (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (evt) => {
+    currentImageData = evt.target.result;
+    imagePreviewThumb.src = currentImageData;
+    imagePreviewBar.style.display = "flex";
+  };
+  reader.readAsDataURL(file);
+});
+
+removeImageBtn.addEventListener("click", () => {
+  currentImageData = null;
+  faceInput.value = "";
+  imagePreviewBar.style.display = "none";
+});
 
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 
@@ -534,13 +663,37 @@ function renderReply(b, parts) {
 
 // The proxy returns { parts: [{kind:"text",text} | {kind:"a2ui",data}] }.
 async function sendMessage(text) {
-  if (!text) return;
-  bubble("user").textContent = text;
+  const imageToSend = currentImageData;
+  if (!text && !imageToSend) return;
+
+  const userBubble = bubble("user");
+  if (imageToSend) {
+    const imgEl = el("img", "user-uploaded-thumb");
+    imgEl.src = imageToSend;
+    userBubble.appendChild(imgEl);
+  }
+  if (text) {
+    userBubble.appendChild(el("div", null, text));
+  } else if (imageToSend) {
+    userBubble.appendChild(el("div", null, "📸 Please perform a clinical skin analysis on my face photo, assess my skin texture, tone, and expression lines, and recommend tailored treatments."));
+  }
+
   input.value = "";
+  currentImageData = null;
+  faceInput.value = "";
+  imagePreviewBar.style.display = "none";
+
   const b = bubble("agent");
   b.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
   try {
-    const res = await fetch("/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text }) });
+    const res = await fetch("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: text,
+        image_data: imageToSend,
+      })
+    });
     const raw = await res.text();
     let data;
     try { data = JSON.parse(raw); }
@@ -554,7 +707,7 @@ async function sendMessage(text) {
 form.addEventListener("submit", (ev) => {
   ev.preventDefault();
   const text = input.value.trim();
-  if (text) sendMessage(text);
+  sendMessage(text);
 });
 
 document.querySelectorAll(".prompt-chip").forEach((chip) => {

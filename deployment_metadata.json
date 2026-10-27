@@ -3,6 +3,5 @@
   "deployment_target": "agent_runtime",
   "is_a2a": true,
   "agent_directory": "app",
-  "deployment_timestamp": "2026-10-26T20:14:26.077347+00:00",
-  "sandbox_resource_name": "projects/1009109819911/locations/us-east1/reasoningEngines/921574362518126592/sandboxEnvironments/6553955716707647488"
+  "deployment_timestamp": "2026-10-27T02:56:09.221706+00:00"
 }

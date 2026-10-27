@@ -606,6 +606,86 @@ def generate_treatment_video(
         return {"error": f"Video generation or upload failed: {str(e)}"}
 
 
+def generate_post_treatment_preview(
+    treatment_name: str,
+    target_area: str,
+    client_facial_features: str,
+    expected_aesthetic_outcome: str,
+    tool_context: ToolContext = None,
+) -> dict:
+    """Generates a high-resolution clinical aesthetic simulation image showing the post-treatment result of Botox or Dermal Fillers applied to the client's face.
+
+    Uses gemini-3.1-flash-lite-image in the global region to generate a realistic visual preview
+    showing subtle, natural aesthetic enhancement (e.g. smoothed dynamic lines for Botox, restored volume for fillers).
+    Saves the image into the agent Playground's Artifacts panel and uploads to the public Cloud Storage bucket,
+    returning its public HTTPS URL so it can be displayed in an A2UI card.
+
+    Args:
+        treatment_name: Aesthetic injectable treatment (e.g. 'Botox (Botulinum Toxin)' or 'Dermal Fillers (Hyaluronic Acid)').
+        target_area: Facial anatomical area (e.g. 'Forehead & Glabellar Frown Lines', 'Crow\'s Feet', 'Cheekbones & Midface Volume', 'Lips & Perioral Lines', 'Nasolabial Folds').
+        client_facial_features: Description of client's facial appearance, age bracket, and skin tone based on their uploaded photo.
+        expected_aesthetic_outcome: Clinical aesthetic result (e.g. 'Softened dynamic expression lines, smooth youthful forehead, natural facial mobility preserved' or 'Naturally restored midface cheek fullness and subtle contour lift').
+        tool_context: Injected tool context for saving artifacts in the agent playground.
+
+    Returns:
+        Dictionary with status, treatment_name, target_area, artifact_filename, and public Cloud Storage HTTPS URL.
+    """
+    try:
+        client = genai.Client(
+            vertexai=True,
+            project=FIRESTORE_PROJECT_ID,
+            location="global",
+        )
+        prompt = (
+            f"Clinical medical aesthetics post-treatment result: Close-up beauty portrait showing the natural, subtle, refined outcome of {treatment_name} in the {target_area}. "
+            f"Client profile: {client_facial_features}. Aesthetic result: {expected_aesthetic_outcome}. "
+            "High resolution, natural skin texture, soft professional clinic dermatology lighting, elegant aesthetic medspa standard, clean aesthetic."
+        )
+        response = client.models.generate_content(
+            model="gemini-3.1-flash-lite-image",
+            contents=[prompt],
+            config=types.GenerateContentConfig(
+                response_modalities=["IMAGE"],
+            ),
+        )
+
+        image_bytes = None
+        mime_type = "image/jpeg"
+        if response.parts:
+            for part in response.parts:
+                if part.inline_data and part.inline_data.data:
+                    image_bytes = part.inline_data.data
+                    mime_type = part.inline_data.mime_type or "image/jpeg"
+                    break
+
+        if not image_bytes:
+            return {"error": "Failed to generate post-treatment simulation image."}
+
+        filename = f"post_treatment_{uuid.uuid4().hex[:8]}.jpg"
+
+        if tool_context is not None:
+            part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+            tool_context.save_artifact(filename=filename, artifact=part)
+
+        storage_client = storage.Client(project=FIRESTORE_PROJECT_ID)
+        bucket = storage_client.bucket(GCS_MEDIA_BUCKET)
+        blob = bucket.blob(filename)
+        blob.upload_from_string(image_bytes, content_type=mime_type)
+
+        public_url = f"https://storage.googleapis.com/{GCS_MEDIA_BUCKET}/{filename}"
+
+        return {
+            "status": "success",
+            "treatment_name": treatment_name,
+            "target_area": target_area,
+            "artifact_filename": filename,
+            "public_url": public_url,
+            "note": "Post-treatment visual preview generated successfully. Display this image URL to the client.",
+        }
+    except Exception as e:
+        return {"error": f"Post-treatment simulation failed: {str(e)}"}
+
+
 code_executor = AgentEngineSandboxCodeExecutor(
     sandbox_resource_name=SANDBOX_RESOURCE_NAME,
 )
@@ -633,12 +713,24 @@ role_description = (
     "3. Skin Profile: Fitzpatrick skin type (I-VI), barrier sensitivity (reactive, rosacea, melasma-prone), and target concerns.\n"
     "4. Treatment History & Preferences: Past procedures and skin reactions, strict downtime tolerance, upcoming event milestones, "
     "and scheduling preferences.\n\n"
+    "### VISUAL FACIAL SKIN ANALYSIS & CONSULTATION PROTOCOL\n"
+    "When a client uploads or takes a photo of their face:\n"
+    "1. Thorough Visual Skin Analysis:\n"
+    "   - Complexion & Tone: Fitzpatrick skin type estimation, presence of erythema/redness, hyperpigmentation, sun spots, or melasma.\n"
+    "   - Texture & Pores: Pores, congestion, active acne, textural unevenness, or acne scarring.\n"
+    "   - Dynamic vs. Static Lines: Forehead horizontal lines, glabellar frown lines ('11s'), periorbital crow's feet, smile lines.\n"
+    "   - Volume & Contours: Midface cheek volume, tear troughs, nasolabial folds, marionette lines, lip fullness.\n"
+    "2. Interactive Client Dialogue & Goal Discovery:\n"
+    "   - Share your clinical observations in an empathetic, empowering manner.\n"
+    "   - Ask the client about their specific goals: 'What would you most like to focus on or improve?' Inquire about downtime preferences.\n"
+    "   - Offer tailored treatment recommendations based on both your clinical findings and their stated goals.\n"
+    "3. Botox & Dermal Filler Post-Treatment Visual Simulations:\n"
+    "   - When discussing or recommending Botox or Dermal Fillers, call `generate_post_treatment_preview` to generate a realistic visual preview of the anticipated subtle post-treatment outcome.\n"
+    "   - Display the generated preview URL in an A2UI card with treatment details and realistic expectations.\n\n"
     "### WORKFLOW GUIDELINES\n"
-    "- At the start of each turn, use preloaded memories to check contraindications and tailor treatment recommendations "
-    "without forcing the client to re-declare their medical or skincare history.\n"
-    "- Whenever a client mentions skin concerns, allergies, or current actives, actively acknowledge and factor them into pre/post-care advice.\n"
+    "- At the start of each turn, use preloaded memories to check contraindications and tailor treatment recommendations.\n"
     "- Assist with treatments (facial rejuvenations, peels, microneedling, lasers, injectables), active ingredient safety checks, "
-    "live local UV index & sun safety, geocoding clinic addresses, finding nearby locations, visual treatment image previews, generating short aesthetic videos, and booking consultations.\n"
+    "live local UV index & sun safety, geocoding clinic addresses, finding nearby locations, visual treatment image previews, generating short aesthetic videos, post-treatment simulations, and booking consultations.\n"
     "- Run Python code in the sandbox when calculating package discounts, treatment intervals, or custom pricing.\n"
     "- Always use your tools to provide accurate, verified information."
 )
@@ -684,6 +776,7 @@ root_agent = Agent(
         search_nearby_places,
         generate_treatment_image,
         generate_treatment_video,
+        generate_post_treatment_preview,
         book_consultation,
         get_consultation,
         get_current_time,

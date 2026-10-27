@@ -24,6 +24,7 @@ Run:
   python main.py                 # -> http://localhost:8080
 """
 
+import base64
 import os
 import uuid
 
@@ -34,6 +35,7 @@ from a2a.client import ClientConfig, ClientFactory
 from a2a.types import (
     AgentCard,
     FilePart,
+    FileWithBytes,
     Message,
     Part,
     Role,
@@ -45,8 +47,13 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from google.cloud import storage
 
 load_dotenv()
+
+GCS_MEDIA_BUCKET = os.environ.get(
+    "GCS_MEDIA_BUCKET", "glow-aesthetics-media-03-3746e4b526aa"
+)
 
 RESOURCE = os.environ.get(
     "AGENT_ENGINE_RESOURCE_NAME",
@@ -154,7 +161,59 @@ async def chat(req: Request):
     body = await req.json()
     message = body.get("message", "")
     user_id = body.get("user_id") or "web-user"
+    image_data = body.get("image_data")
     parts: list[dict] = []
+
+    public_image_url = None
+    msg_parts: list[Part] = []
+
+    if image_data and "base64," in image_data:
+        try:
+            header, b64_str = image_data.split("base64,", 1)
+            image_mime = "image/jpeg"
+            if ":" in header and ";" in header:
+                image_mime = header.split(":")[1].split(";")[0]
+
+            image_bytes = base64.b64decode(b64_str)
+            ext = "jpg"
+            if "png" in image_mime:
+                ext = "png"
+            elif "webp" in image_mime:
+                ext = "webp"
+            filename = f"client_uploads/face_{uuid.uuid4().hex[:8]}.{ext}"
+
+            # Upload to Cloud Storage bucket for persistence and public reference
+            try:
+                storage_client = storage.Client(project=RESOURCE.split("/")[1])
+                bucket = storage_client.bucket(GCS_MEDIA_BUCKET)
+                blob = bucket.blob(filename)
+                blob.upload_from_string(image_bytes, content_type=image_mime)
+                public_image_url = f"https://storage.googleapis.com/{GCS_MEDIA_BUCKET}/{filename}"
+            except Exception as se:
+                print(f"GCS upload warning: {se}")
+
+            # Include raw file bytes in A2A Message so agent can perceive image
+            msg_parts.append(
+                Part(
+                    root=FilePart(
+                        file=FileWithBytes(
+                            bytes=b64_str,
+                            mime_type=image_mime,
+                            name=filename.split("/")[-1],
+                        )
+                    )
+                )
+            )
+        except Exception as ie:
+            print(f"Image parsing error: {ie}")
+
+    full_text = message
+    if public_image_url:
+        full_text = f"[Client attached face photo: {public_image_url}]\n{message or 'Please perform a clinical skin analysis on my face, assess skin texture, tone, and expression lines, and recommend tailored treatments.'}"
+    elif not full_text:
+        full_text = "Hello! Please recommend aesthetic treatments for my skin."
+
+    msg_parts.append(Part(root=TextPart(text=full_text)))
 
     async with httpx.AsyncClient(headers=_auth_headers(), timeout=120) as client:
         card = await _get_card(client)
@@ -172,7 +231,7 @@ async def chat(req: Request):
         msg = Message(
             message_id=str(uuid.uuid4()),
             role=Role.user,
-            parts=[Part(root=TextPart(text=message))],
+            parts=msg_parts,
             context_id=_contexts.get(user_id),
         )
 
