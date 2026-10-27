@@ -550,7 +550,39 @@ const imagePreviewThumb = document.getElementById("image-preview-thumb");
 const removeImageBtn = document.getElementById("remove-image-btn");
 
 let currentImageData = null;
+let hasSessionPhoto = false;
 let pendingMakeoverPrompt = null;
+
+function resizeAndCompressImage(file, maxDimension, quality, callback) {
+  const reader = new FileReader();
+  reader.onload = (evt) => {
+    const img = new Image();
+    img.onload = () => {
+      let w = img.width;
+      let h = img.height;
+      if (w > maxDimension || h > maxDimension) {
+        if (w > h) {
+          h = Math.round((h * maxDimension) / w);
+          w = maxDimension;
+        } else {
+          w = Math.round((w * maxDimension) / h);
+          h = maxDimension;
+        }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, w, h);
+      callback(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => {
+      callback(evt.target.result);
+    };
+    img.src = evt.target.result;
+  };
+  reader.readAsDataURL(file);
+}
 
 cameraBtn.addEventListener("click", () => {
   faceInput.click();
@@ -559,10 +591,14 @@ cameraBtn.addEventListener("click", () => {
 faceInput.addEventListener("change", (e) => {
   const file = e.target.files && e.target.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = (evt) => {
-    currentImageData = evt.target.result;
+  resizeAndCompressImage(file, 1280, 0.85, (dataUrl) => {
+    currentImageData = dataUrl;
+    hasSessionPhoto = true;
     imagePreviewThumb.src = currentImageData;
+    const nameEl = document.getElementById("preview-name");
+    const hintEl = document.getElementById("preview-hint");
+    if (nameEl) nameEl.textContent = "Face Photo Attached";
+    if (hintEl) hintEl.textContent = "Ready for makeover or skin analysis";
     imagePreviewBar.style.display = "flex";
 
     if (pendingMakeoverPrompt) {
@@ -570,12 +606,12 @@ faceInput.addEventListener("change", (e) => {
       pendingMakeoverPrompt = null;
       sendMessage(promptToSend);
     }
-  };
-  reader.readAsDataURL(file);
+  });
 });
 
 removeImageBtn.addEventListener("click", () => {
   currentImageData = null;
+  hasSessionPhoto = false;
   pendingMakeoverPrompt = null;
   faceInput.value = "";
   imagePreviewBar.style.display = "none";
@@ -742,7 +778,15 @@ async function sendMessage(text) {
   input.value = "";
   currentImageData = null;
   faceInput.value = "";
-  imagePreviewBar.style.display = "none";
+  if (imageToSend) {
+    hasSessionPhoto = true;
+    const nameEl = document.getElementById("preview-name");
+    const hintEl = document.getElementById("preview-hint");
+    if (nameEl) nameEl.textContent = "📸 Face Photo Active";
+    if (hintEl) hintEl.textContent = "Mapped for all makeover & simulation options";
+    imagePreviewThumb.src = imageToSend;
+    imagePreviewBar.style.display = "flex";
+  }
 
   const b = bubble("agent");
   b.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
@@ -784,7 +828,7 @@ document.querySelectorAll(".prompt-chip").forEach((chip) => {
       chip.textContent.includes("Face Skin Analysis") ||
       chip.textContent.includes("Botox & Filler");
 
-    if (isMakeoverOrAnalysis && !currentImageData) {
+    if (isMakeoverOrAnalysis && !currentImageData && !hasSessionPhoto) {
       pendingMakeoverPrompt = text;
       const chipTitle = chip.textContent.trim();
       const b = bubble("agent");

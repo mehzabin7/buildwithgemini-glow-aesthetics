@@ -108,6 +108,8 @@ async def _json_errors(request: Request, exc: Exception):
 
 # Reuse ONE A2A context per user so the agent remembers the conversation.
 _contexts: dict[str, str] = {}
+# Track active client face photo per user so subsequent makeover requests in the same session have access to the photo.
+_user_photos: dict[str, str] = {}
 # Cache the agent card after the first fetch.
 _card: AgentCard | None = None
 
@@ -207,9 +209,14 @@ async def chat(req: Request):
         except Exception as ie:
             print(f"Image parsing error: {ie}")
 
-    full_text = message
     if public_image_url:
-        full_text = f"[Client attached face photo: {public_image_url}]\n{message or 'Please perform a clinical skin analysis on my face, assess skin texture, tone, and expression lines, and recommend tailored treatments.'}"
+        _user_photos[user_id] = public_image_url
+
+    active_photo_url = public_image_url or _user_photos.get(user_id)
+
+    full_text = message
+    if active_photo_url:
+        full_text = f"[Client face photo: {active_photo_url}]\n{message or 'Please perform a clinical skin analysis on my face, assess skin texture, tone, and expression lines, and recommend tailored treatments.'}"
     elif not full_text:
         full_text = "Hello! Please recommend aesthetic treatments for my skin."
     else:

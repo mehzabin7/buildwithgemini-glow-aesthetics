@@ -606,17 +606,43 @@ def generate_treatment_video(
         return {"error": f"Video generation or upload failed: {str(e)}"}
 
 
+def _load_image_part(image_url: str):
+    """Loads image bytes from Cloud Storage or public HTTPS URL into a genai types.Part."""
+    if not image_url:
+        return None
+    try:
+        if GCS_MEDIA_BUCKET and GCS_MEDIA_BUCKET in image_url:
+            blob_path = image_url.split(f"/{GCS_MEDIA_BUCKET}/", 1)[-1]
+            storage_client = storage.Client(project=FIRESTORE_PROJECT_ID)
+            bucket = storage_client.bucket(GCS_MEDIA_BUCKET)
+            blob = bucket.blob(blob_path)
+            data = blob.download_as_bytes()
+            mime = blob.content_type or "image/jpeg"
+            return types.Part.from_bytes(data=data, mime_type=mime)
+        else:
+            req = urllib.request.Request(image_url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                data = resp.read()
+                mime = resp.headers.get_content_type() or "image/jpeg"
+                return types.Part.from_bytes(data=data, mime_type=mime)
+    except Exception as e:
+        print(f"Warning: failed to load input image from {image_url}: {e}")
+        return None
+
+
 def generate_post_treatment_preview(
     treatment_name: str,
     target_area: str,
     client_facial_features: str,
     expected_aesthetic_outcome: str,
+    client_image_url: str = "",
     tool_context: ToolContext = None,
 ) -> dict:
     """Generates a high-resolution clinical aesthetic simulation image showing the post-treatment result of Botox or Dermal Fillers applied to the client's face.
 
     Uses gemini-3.1-flash-lite-image in the global region to generate a realistic visual preview
     showing subtle, natural aesthetic enhancement (e.g. smoothed dynamic lines for Botox, restored volume for fillers).
+    When client_image_url is provided, performs image-to-image editing retaining the client's exact facial identity.
     Saves the image into the agent Playground's Artifacts panel and uploads to the public Cloud Storage bucket,
     returning its public HTTPS URL so it can be displayed in an A2UI card.
 
@@ -625,6 +651,7 @@ def generate_post_treatment_preview(
         target_area: Facial anatomical area (e.g. 'Forehead & Glabellar Frown Lines', 'Crow\'s Feet', 'Cheekbones & Midface Volume', 'Lips & Perioral Lines', 'Nasolabial Folds').
         client_facial_features: Description of client's facial appearance, age bracket, and skin tone based on their uploaded photo.
         expected_aesthetic_outcome: Clinical aesthetic result (e.g. 'Softened dynamic expression lines, smooth youthful forehead, natural facial mobility preserved' or 'Naturally restored midface cheek fullness and subtle contour lift').
+        client_image_url: Public HTTPS or GCS URL of the client's uploaded face photo to edit directly.
         tool_context: Injected tool context for saving artifacts in the agent playground.
 
     Returns:
@@ -636,14 +663,27 @@ def generate_post_treatment_preview(
             project=FIRESTORE_PROJECT_ID,
             location="global",
         )
-        prompt = (
-            f"Clinical medical aesthetics post-treatment result: Close-up beauty portrait showing the natural, subtle, refined outcome of {treatment_name} in the {target_area}. "
-            f"Client profile: {client_facial_features}. Aesthetic result: {expected_aesthetic_outcome}. "
-            "High resolution, natural skin texture, soft professional clinic dermatology lighting, elegant aesthetic medspa standard, clean aesthetic."
-        )
+        contents = []
+        image_part = _load_image_part(client_image_url)
+        if image_part is not None:
+            contents.append(image_part)
+            prompt = (
+                f"Transform this client's face photograph to show the post-treatment outcome of {treatment_name} in the {target_area}. "
+                "Retain the client's exact identity, bone structure, skin tone, eye shape, and facial symmetry. "
+                f"Apply subtle, believable aesthetic refinement: {expected_aesthetic_outcome}. "
+                "Natural skin pores, delicate micro-texture, professional aesthetic clinic lighting, editorial medical aesthetics."
+            )
+        else:
+            prompt = (
+                f"Clinical medical aesthetics post-treatment result: Close-up beauty portrait showing the natural, subtle, refined outcome of {treatment_name} in the {target_area}. "
+                f"Client profile: {client_facial_features}. Aesthetic result: {expected_aesthetic_outcome}. "
+                "High resolution, natural skin texture, soft professional clinic dermatology lighting, elegant aesthetic medspa standard, clean aesthetic."
+            )
+        contents.append(prompt)
+
         response = client.models.generate_content(
             model="gemini-3.1-flash-lite-image",
-            contents=[prompt],
+            contents=contents,
             config=types.GenerateContentConfig(
                 response_modalities=["IMAGE"],
             ),
@@ -665,7 +705,21 @@ def generate_post_treatment_preview(
 
         if tool_context is not None:
             part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
-            tool_context.save_artifact(filename=filename, artifact=part)
+            try:
+                import inspect
+                res = tool_context.save_artifact(filename=filename, artifact=part)
+                if inspect.isawaitable(res):
+                    import asyncio
+                    try:
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            asyncio.create_task(res)
+                        else:
+                            loop.run_until_complete(res)
+                    except Exception:
+                        pass
+            except Exception as ae:
+                print(f"Artifact save note: {ae}")
 
         storage_client = storage.Client(project=FIRESTORE_PROJECT_ID)
         bucket = storage_client.bucket(GCS_MEDIA_BUCKET)
@@ -692,9 +746,10 @@ def generate_face_makeover_preview(
     technique: str,
     client_facial_features: str,
     desired_aesthetic_outcome: str,
+    client_image_url: str = "",
     tool_context: ToolContext = None,
 ) -> dict:
-    """Generates a high-definition clinical aesthetic makeover simulation showing facial contouring and beautification options applied to the client's face.
+    """Generates a high-definition clinical aesthetic makeover simulation showing facial contouring and beautification options applied directly to the client's face photo.
 
     Supports premier aesthetic methodologies:
     - 'Picasso Technique (Architectural Full-Face Harmonization)': Full-face vector mapping, Phi golden-ratio proportions, structural anchor points across temples, cheeks, chin, and jawline for global balance.
@@ -702,8 +757,8 @@ def generate_face_makeover_preview(
     - 'Nefertiti Mandibular Jawline & Chin Sculpting': Razor-sharp jawline definition, sculpted gonial angle, and elongated chin apex.
     - 'MD Codes™ Midface & Cheek Elevation': Precise anatomical anchoring restoring cheek apex projection and softening tear troughs.
 
-    Uses gemini-3.1-flash-lite-image in the global region. Saves the image artifact to tool_context and uploads
-    to the public Cloud Storage bucket, returning the permanent HTTPS URL for A2UI rendering.
+    Uses gemini-3.1-flash-lite-image in the global region. When client_image_url is provided, performs image-to-image editing directly on the client's face photograph, preserving their identity while applying the targeted aesthetic changes.
+    Saves the image artifact to tool_context and uploads to the public Cloud Storage bucket, returning the permanent HTTPS URL for A2UI rendering.
 
     Args:
         makeover_style: The makeover category (e.g. 'Picasso Full-Face Harmonization', 'Russian Lip Filler & Cupid\'s Bow', 'Nefertiti Jawline & Chin Contour', 'MD Codes Cheek Lift').
@@ -711,6 +766,7 @@ def generate_face_makeover_preview(
         technique: Aesthetic injection or contouring methodology (e.g. 'Picasso structural vector balancing', 'Russian vertical fanning micro-droplets', 'MD Codes Ck1-Ck3 structural bolus', 'Mandibular cannula contouring').
         client_facial_features: Description of the client's facial structure, skin tone, and features from their uploaded photo.
         desired_aesthetic_outcome: The targeted aesthetic transformation (e.g. 'Lush doll-like lips with defined Cupid\'s bow and flat profile' or 'Harmonious full-face architectural balance without overfilling').
+        client_image_url: Public HTTPS or GCS URL of the client's uploaded face photo to edit directly.
         tool_context: Injected tool context for saving artifacts in the playground.
 
     Returns:
@@ -754,17 +810,30 @@ def generate_face_makeover_preview(
                 f"Enhancing {target_features} to achieve {desired_aesthetic_outcome}."
             )
 
-        prompt = (
-            f"Clinical medical aesthetics makeover result portrait: High-end close-up beauty portrait showing {makeover_style}. "
-            f"Client profile: {client_facial_features}. "
-            f"Technique methodology: {technique_focus}. "
-            f"Desired outcome: {desired_aesthetic_outcome}. "
-            "High resolution 8k photography, natural skin pores and micro-texture, soft luxury medspa lighting, refined editorial aesthetics, believable anatomical perfection."
-        )
+        contents = []
+        image_part = _load_image_part(client_image_url)
+        if image_part is not None:
+            contents.append(image_part)
+            prompt = (
+                f"Transform this client's face photograph to apply the {makeover_style} makeover using the {technique} technique. "
+                "Maintain the client's exact facial identity, bone structure, eye shape, skin tone, and hair. "
+                f"Modify only the targeted features ({target_features}) to apply the simulated aesthetic enhancements: {desired_aesthetic_outcome}. "
+                f"Technique methodology: {technique_focus}. "
+                "Photorealistic editorial medical aesthetics, natural anatomical preservation, seamless aesthetic blend, 8k beauty clinic photography."
+            )
+        else:
+            prompt = (
+                f"Clinical medical aesthetics makeover result portrait: High-end close-up beauty portrait showing {makeover_style}. "
+                f"Client profile: {client_facial_features}. "
+                f"Technique methodology: {technique_focus}. "
+                f"Desired outcome: {desired_aesthetic_outcome}. "
+                "High resolution 8k photography, natural skin pores and micro-texture, soft luxury medspa lighting, refined editorial aesthetics, believable anatomical perfection."
+            )
+        contents.append(prompt)
 
         response = client.models.generate_content(
             model="gemini-3.1-flash-lite-image",
-            contents=[prompt],
+            contents=contents,
             config=types.GenerateContentConfig(
                 response_modalities=["IMAGE"],
             ),
@@ -786,7 +855,21 @@ def generate_face_makeover_preview(
 
         if tool_context is not None:
             part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
-            tool_context.save_artifact(filename=filename, artifact=part)
+            try:
+                import inspect
+                res = tool_context.save_artifact(filename=filename, artifact=part)
+                if inspect.isawaitable(res):
+                    import asyncio
+                    try:
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            asyncio.create_task(res)
+                        else:
+                            loop.run_until_complete(res)
+                    except Exception:
+                        pass
+            except Exception as ae:
+                print(f"Artifact save note: {ae}")
 
         storage_client = storage.Client(project=FIRESTORE_PROJECT_ID)
         bucket = storage_client.bucket(GCS_MEDIA_BUCKET)
@@ -861,8 +944,8 @@ role_description = (
     "   - Provide clear options to the client (e.g. if the client wants lips, explain the Russian Lip & Cupid's Bow technique, and suggest how it pairs with Picasso full-face harmonization or jawline contouring).\n"
     "   - Detail the treatment specifics: expected product (e.g. Restylane Kysse/Juvederm Volbella for lips, Voluma/Radiesse for jawline/cheeks), typical units/syringes, downtime, and investment.\n"
     "3. Mandatory Face Photo Requirement for Makeovers & Applying Visual Changes:\n"
-    "   - CRITICAL CLINICAL PROTOCOL: Before calling `generate_face_makeover_preview` or `generate_post_treatment_preview`, you MUST confirm that the client has uploaded or provided a photo of their face (indicated by an attached photo in the prompt/input).\n"
-    "   - IF NO FACE PHOTO HAS BEEN PROVIDED:\n"
+    "   - CRITICAL CLINICAL PROTOCOL: Before calling `generate_face_makeover_preview` or `generate_post_treatment_preview`, confirm that the client has provided a photo of their face (indicated by `[Client face photo: <url>]` or attached photo in the prompt/input).\n"
+    "   - IF NO FACE PHOTO HAS BEEN PROVIDED AT ALL:\n"
     "     • DO NOT call `generate_face_makeover_preview` or `generate_post_treatment_preview`.\n"
     "     • Explain the requested technique and its aesthetic benefits (e.g., Picasso structural vectors, Russian lip vertical micro-droplets, Nefertiti contouring).\n"
     "     • Explicitly instruct the client to upload or take a picture of their face using the 📸 camera button so their unique anatomy can be mapped.\n"
@@ -871,10 +954,11 @@ role_description = (
     "       b) Angle & Expression: front-facing or slight 3/4 angle with a relaxed, neutral facial expression\n"
     "       c) Unobscured features: hair tucked back, no sunglasses, heavy hats, or beauty filters masking facial contours\n"
     "     • Tell the client: 'As soon as you attach your photo, I will analyze your facial proportions and generate your personalized makeover simulation.'\n"
-    "   - IF A FACE PHOTO IS PROVIDED:\n"
+    "   - IF A FACE PHOTO IS PROVIDED (e.g. indicated by `[Client face photo: <url>]` or input image):\n"
     "     • Verify the photo fulfills the requirements.\n"
     "     • Perform the anatomical feature assessment (lip shape, Cupid's bow, jawline angle, cheek projection, facial thirds).\n"
-    "     • Call `generate_face_makeover_preview` with their features and display the simulated makeover in an A2UI card with clinical notes.\n\n"
+    "     • Extract the photo URL (if present in `[Client face photo: <url>]`) and pass it as `client_image_url` when calling `generate_face_makeover_preview` or `generate_post_treatment_preview` so the model directly transforms the client's actual photograph!\n"
+    "     • Display the generated preview image in an A2UI card with clinical technique notes.\n\n"
     "### WORKFLOW GUIDELINES\n"
     "- At the start of each turn, use preloaded memories to check contraindications and tailor treatment recommendations.\n"
     "- Assist with treatments (facial rejuvenations, peels, microneedling, lasers, injectables), active ingredient safety checks, "
